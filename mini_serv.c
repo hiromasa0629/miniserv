@@ -178,12 +178,10 @@ void	handle_message(t_client* cli, char* full_msg)
 	char*	response;
 	char	front[4096];
 
-	response = (char *)malloc(sizeof(char) * (strlen(full_msg) + 100));
-	if (!response)
-		handle_fatal_error();
+	respones = NULL;
 	bzero(front, 4096);
 	sprintf(front, "client %d: ", cli->id);
-	response = str_join(NULL, front);
+	response = str_join(response, front);
 	response = str_join(response, full_msg);
 	send_all(cli->fd, response);
 	free(response);
