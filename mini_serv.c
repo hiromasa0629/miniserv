@@ -105,8 +105,11 @@ void	ft_lstdelone(unsigned long long id)
 	t_client*	tmp_next;
 	
 	tmp = clients;
+	// printf("delone id: %llu, tmp id: %llu\n", id, tmp->id);
 	if (tmp->id == id)
 	{
+		clients = tmp->next;
+		FD_CLR(tmp->fd, &sock.default_readfds);
 		free(tmp);
 		return ;
 	}
@@ -116,7 +119,7 @@ void	ft_lstdelone(unsigned long long id)
 		if (tmp_next && tmp_next->id == id)
 		{
 			tmp->next = tmp_next->next;
-			FD_CLR(tmp->fd, &sock.default_readfds);
+			FD_CLR(tmp_next->fd, &sock.default_readfds);
 			free(tmp_next);
 			return ;
 		}
@@ -165,11 +168,11 @@ void	accept_connection(void)
 	clientfd = accept(sock.socketfd, (struct sockaddr *)&cli, &cli_len);
 	if (clientfd == -1)
 		handle_fatal_error();
+	sprintf(s, "server: client %llu just arrived\n", g_id);
 	ft_lstadd(clientfd, g_id++);
 	if (clientfd > maxfd)
 		maxfd = clientfd;
 	FD_SET(clientfd, &sock.default_readfds);
-	sprintf(s, "server: client %d just arrived\n", clientfd);
 	send_all(clientfd, s);
 }
 
@@ -222,60 +225,73 @@ int extract_message(char **buf, char **msg)
 
 void	handle_message(int fd, char* full_msg)
 {
-	char*	msg;
-	int		ret;
 	char*	response;
-	
-	msg = NULL;
-	ret = extract_message(&full_msg, &msg);
-	while (ret != 0)
-	{
-		if (ret == -1)
-			handle_fatal_error();
-		response = (char *)malloc(sizeof(char) * (strlen(msg) + 100));
-		if (!response)
-			handle_fatal_error();
-		strcpy(response, msg);
-		free(msg);
-		msg = NULL;
-		send_all(fd, response);
-		free(response);
-		response = NULL;
-		ret = extract_message(&full_msg, &msg);
-	}
+	char	front[4096];
+	t_client*	client;
+
+	client = ft_getlstbyfd(fd);
+	response = (char *)malloc(sizeof(char) * (strlen(full_msg) + 100));
+	if (!response)
+		handle_fatal_error();
+	bzero(front, 4096);
+	sprintf(front, "client %llu: ", client->id);
+	response = str_join(NULL, front);
+	response = str_join(response, full_msg);
+	send_all(fd, response);
+	free(response);
 }
 
 void	handle_pollin(int fd)
 {
 	t_client*	client;
 	char		buf[4096];
-	ssize_t		size;
+	ssize_t		size = 1;
 	char		s[4096];
 	char*		full_msg;
 	
 	client = ft_getlstbyfd(fd);
 	bzero(buf, 4096);
-	size = recv(fd, buf, 4096, 0);
-	if (size <= 0)
+	size = recv(fd, buf, 1, 0);
+	if (size == 0)
 	{
-		sprintf(s, "server: client %d just left\n", fd);
+		sprintf(s, "server: client %llu just left\n", client->id);
 		send_all(client->fd, s);
+		close(fd);
 		ft_lstdelone(client->id);
 	}
 	else
 	{
 		full_msg = NULL;
-		while (size > 0)
+		while (size == 1)
 		{
 			if (!full_msg)
 				full_msg = str_join(NULL, buf);
 			else
 				full_msg = str_join(full_msg, buf);
 			bzero(buf, 4096);
-			size = recv(fd, buf, 4096, 0);
+			size = recv(fd, buf, 1, 0);
+			if (buf[0] == '\n')
+			{
+				full_msg = str_join(full_msg, buf);
+				break ;
+			}
 		}
 		handle_message(fd, full_msg);
+		free(full_msg);
 	}
+}
+
+void	ft_printlst(void)
+{
+	t_client*	tmp;
+	
+	tmp = clients;
+	while (tmp)
+	{
+		printf("1. fd: %d, tmp.id: %llu\n", tmp->fd, tmp->id);
+		tmp = tmp->next;
+	}
+	printf("\n");
 }
 
 int	main(int ac, char** av)
@@ -299,6 +315,7 @@ int	main(int ac, char** av)
 	while (1)
 	{
 		readfds = sock.default_readfds;
+		// ft_printlst();
 		select_ready = select(maxfd + 1, &readfds, NULL, NULL, NULL);
 		if (select_ready == -1)
 			handle_fatal_error();
@@ -312,7 +329,6 @@ int	main(int ac, char** av)
 		else
 		{
 			tmp = clients;
-			
 			while (tmp)
 			{
 				if (FD_ISSET(tmp->fd, &readfds))
