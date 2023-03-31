@@ -178,7 +178,7 @@ void	handle_message(t_client* cli, char* full_msg)
 	char*	response;
 	char	front[4096];
 
-	respones = NULL;
+	response = NULL;
 	bzero(front, 4096);
 	sprintf(front, "client %d: ", cli->id);
 	response = str_join(response, front);
