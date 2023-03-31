@@ -56,15 +56,15 @@ void	init(char* port)
 	sock.socketfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock.socketfd == -1)
 		handle_fatal_error();
-	// int tmp = 1;																// To be deleted
-	// setsockopt(sock.socketfd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp));		// To be deleted
+	int tmp = 1;																// To be deleted
+	setsockopt(sock.socketfd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp));		// To be deleted
 	bzero(&(sock.addr), sizeof(sock.addr));
 	sock.addr.sin_family = AF_INET;
 	sock.addr.sin_addr.s_addr = htonl(2130706433);
 	sock.addr.sin_port = htons(atoi(port));
 	if ((bind(sock.socketfd, (const struct sockaddr *)&(sock.addr), sizeof(sock.addr))) != 0)
 		handle_fatal_error();
-	if (listen(sock.socketfd, SOMAXCONN) != 0)
+	if (listen(sock.socketfd, 128) != 0)
 		handle_fatal_error();
 }
 
@@ -196,7 +196,7 @@ void	handle_pollin(t_client* cli)
 	
 	bzero(buf, 4096);
 	size = recv(cli->fd, buf, 1, 0);
-	if (size == 0)
+	if (size <= 0)
 	{
 		sprintf(s, "server: client %d just left\n", cli->id);
 		send_all(cli->fd, s);
@@ -233,6 +233,7 @@ int	main(int ac, char** av)
 	int			select_ready;
 	fd_set		readfds;
 	t_client*	tmp;
+	t_client*	tmp2;
 
 	maxfd = sock.socketfd;
 	FD_ZERO(&readfds);
@@ -253,9 +254,10 @@ int	main(int ac, char** av)
 			tmp = clients;
 			while (tmp)
 			{
-				if (FD_ISSET(tmp->fd, &readfds))
-					handle_pollin(tmp);
+				tmp2 = tmp;
 				tmp = tmp->next;
+				if (FD_ISSET(tmp2->fd, &readfds))
+					handle_pollin(tmp2);
 			}
 		}
 	}
