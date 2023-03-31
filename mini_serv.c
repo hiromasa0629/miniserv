@@ -19,13 +19,13 @@ typedef struct s_mySocket
 typedef struct s_client
 {
 	int					fd;
-	unsigned long long	id;
+	int					id;
 	struct s_client*	next;
 }	t_client;
 
 t_client*			clients = NULL;
 t_mySocket			sock;
-unsigned long long	g_id = 0;
+int					g_id = 0;
 int					maxfd = 0;
 
 void	ft_putstr_fd(int fd, char* str)
@@ -40,24 +40,14 @@ void	handle_fatal_error(void)
 	t_client*	tmp;
 	
 	ft_putstr_fd(2, "Fatal error\n");
-	if (maxfd == 0)
-	{
-		if (sock.socketfd == 0)
-			exit(1);
+	if (sock.socketfd != 0)
 		close(sock.socketfd);
-		exit(1);
-	}
-	else
+	while (clients)
 	{
-		for (int i = 0; i < maxfd + 1; i++)
-			if (FD_ISSET(i, &sock.default_readfds))
-				close(i);
-		while (clients)
-		{
-			tmp = clients->next;
-			free(clients);
-			clients = tmp;
-		}
+		tmp = clients;
+		clients = tmp->next;
+		close(tmp->fd);
+		free(tmp);
 	}
 }
 
@@ -66,8 +56,8 @@ void	init(char* port)
 	sock.socketfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock.socketfd == -1)
 		handle_fatal_error();
-	int tmp = 1;																// To be deleted
-	setsockopt(sock.socketfd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp));		// To be deleted
+	// int tmp = 1;																// To be deleted
+	// setsockopt(sock.socketfd, SOL_SOCKET, SO_REUSEADDR, &tmp, sizeof(tmp));		// To be deleted
 	bzero(&(sock.addr), sizeof(sock.addr));
 	sock.addr.sin_family = AF_INET;
 	sock.addr.sin_addr.s_addr = htonl(2130706433);
@@ -78,7 +68,7 @@ void	init(char* port)
 		handle_fatal_error();
 }
 
-void	ft_lstadd(int clientfd, unsigned long long id)
+void	add_client(int clientfd, int id)
 {
 	t_client*	tmp;
 	
@@ -99,46 +89,33 @@ void	ft_lstadd(int clientfd, unsigned long long id)
 		tmp->next = client;
 }
 
-void	ft_lstdelone(unsigned long long id)
+void	remove_client(int fd)
 {
 	t_client*	tmp;
 	t_client*	tmp_next;
 	
 	tmp = clients;
-	// printf("delone id: %llu, tmp id: %llu\n", id, tmp->id);
-	if (tmp->id == id)
+	if (tmp->fd == fd)
 	{
 		clients = tmp->next;
 		FD_CLR(tmp->fd, &sock.default_readfds);
+		close(tmp->fd);
 		free(tmp);
 		return ;
 	}
 	while (tmp)
 	{
 		tmp_next = tmp->next;
-		if (tmp_next && tmp_next->id == id)
+		if (tmp_next && tmp_next->fd == fd)
 		{
 			tmp->next = tmp_next->next;
 			FD_CLR(tmp_next->fd, &sock.default_readfds);
+			close(tmp_next->fd);
 			free(tmp_next);
 			return ;
 		}
 		tmp = tmp_next;
 	}
-}
-
-t_client*	ft_getlstbyfd(int fd)
-{
-	t_client*	tmp;
-	
-	tmp = clients;
-	while (tmp)
-	{
-		if (tmp->fd == fd)
-			return (tmp);
-		tmp = tmp->next;
-	}
-	return (NULL);
 }
 
 void	send_all(int skip_fd, char* s)
@@ -168,8 +145,8 @@ void	accept_connection(void)
 	clientfd = accept(sock.socketfd, (struct sockaddr *)&cli, &cli_len);
 	if (clientfd == -1)
 		handle_fatal_error();
-	sprintf(s, "server: client %llu just arrived\n", g_id);
-	ft_lstadd(clientfd, g_id++);
+	sprintf(s, "server: client %d just arrived\n", g_id);
+	add_client(clientfd, g_id++);
 	if (clientfd > maxfd)
 		maxfd = clientfd;
 	FD_SET(clientfd, &sock.default_readfds);
@@ -187,7 +164,7 @@ char *str_join(char *buf, char *add)
 		len = strlen(buf);
 	newbuf = malloc(sizeof(*newbuf) * (len + strlen(add) + 1));
 	if (newbuf == 0)
-		return (0);
+		handle_fatal_error();
 	newbuf[0] = 0;
 	if (buf != 0)
 		strcat(newbuf, buf);
@@ -196,102 +173,53 @@ char *str_join(char *buf, char *add)
 	return (newbuf);
 }
 
-int extract_message(char **buf, char **msg)
-{
-	char	*newbuf;
-	int	i;
-
-	*msg = 0;
-	if (*buf == 0)
-		return (0);
-	i = 0;
-	while ((*buf)[i])
-	{
-		if ((*buf)[i] == '\n')
-		{
-			newbuf = calloc(1, sizeof(*newbuf) * (strlen(*buf + i + 1) + 1));
-			if (newbuf == 0)
-				return (-1);
-			strcpy(newbuf, *buf + i + 1);
-			*msg = *buf;
-			(*msg)[i + 1] = 0;
-			*buf = newbuf;
-			return (1);
-		}
-		i++;
-	}
-	return (0);
-}
-
-void	handle_message(int fd, char* full_msg)
+void	handle_message(t_client* cli, char* full_msg)
 {
 	char*	response;
 	char	front[4096];
-	t_client*	client;
 
-	client = ft_getlstbyfd(fd);
 	response = (char *)malloc(sizeof(char) * (strlen(full_msg) + 100));
 	if (!response)
 		handle_fatal_error();
 	bzero(front, 4096);
-	sprintf(front, "client %llu: ", client->id);
+	sprintf(front, "client %d: ", cli->id);
 	response = str_join(NULL, front);
 	response = str_join(response, full_msg);
-	send_all(fd, response);
+	send_all(cli->fd, response);
 	free(response);
 }
 
-void	handle_pollin(int fd)
+void	handle_pollin(t_client* cli)
 {
-	t_client*	client;
 	char		buf[4096];
 	ssize_t		size = 1;
 	char		s[4096];
 	char*		full_msg;
 	
-	client = ft_getlstbyfd(fd);
 	bzero(buf, 4096);
-	size = recv(fd, buf, 1, 0);
+	size = recv(cli->fd, buf, 1, 0);
 	if (size == 0)
 	{
-		sprintf(s, "server: client %llu just left\n", client->id);
-		send_all(client->fd, s);
-		close(fd);
-		ft_lstdelone(client->id);
+		sprintf(s, "server: client %d just left\n", cli->id);
+		send_all(cli->fd, s);
+		remove_client(cli->fd);
 	}
 	else
 	{
 		full_msg = NULL;
 		while (size == 1)
 		{
-			if (!full_msg)
-				full_msg = str_join(NULL, buf);
-			else
-				full_msg = str_join(full_msg, buf);
-			bzero(buf, 4096);
-			size = recv(fd, buf, 1, 0);
 			if (buf[0] == '\n')
 			{
 				full_msg = str_join(full_msg, buf);
 				break ;
 			}
+			full_msg = str_join(full_msg, buf);
+			size = recv(cli->fd, buf, 1, 0);
 		}
-		handle_message(fd, full_msg);
+		handle_message(cli, full_msg);
 		free(full_msg);
 	}
-}
-
-void	ft_printlst(void)
-{
-	t_client*	tmp;
-	
-	tmp = clients;
-	while (tmp)
-	{
-		printf("1. fd: %d, tmp.id: %llu\n", tmp->fd, tmp->id);
-		tmp = tmp->next;
-	}
-	printf("\n");
 }
 
 int	main(int ac, char** av)
@@ -315,24 +243,20 @@ int	main(int ac, char** av)
 	while (1)
 	{
 		readfds = sock.default_readfds;
-		// ft_printlst();
 		select_ready = select(maxfd + 1, &readfds, NULL, NULL, NULL);
 		if (select_ready == -1)
 			handle_fatal_error();
 		if (select_ready == 0)
 			continue ;
 		if (FD_ISSET(sock.socketfd, &readfds))
-		{		
 			accept_connection();
-			FD_CLR(sock.socketfd, &readfds);
-		}
 		else
 		{
 			tmp = clients;
 			while (tmp)
 			{
 				if (FD_ISSET(tmp->fd, &readfds))
-					handle_pollin(tmp->fd);
+					handle_pollin(tmp);
 				tmp = tmp->next;
 			}
 		}
